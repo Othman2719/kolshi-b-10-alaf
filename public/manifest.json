@@ -1,0 +1,17 @@
+{
+  "name": "Hanout Kolshi b 10 Alaf",
+  "short_name": "10 Alaf",
+  "description": "Gestion de magasin et caisse rapide Tout à 100 DA",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#10b981",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/logo.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}

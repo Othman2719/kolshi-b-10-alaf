@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <rect width="512" height="512" rx="128" fill="#10b981"/>
+  <circle cx="256" cy="256" r="180" fill="#047857"/>
+  <text x="256" y="270" font-family="Arial, sans-serif" font-size="120" font-weight="900" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">100</text>
+  <text x="256" y="340" font-family="Arial, sans-serif" font-size="50" font-weight="bold" fill="#a7f3d0" text-anchor="middle" dominant-baseline="middle">DA / دج</text>
+  <path d="M160 140 H352" stroke="#ffffff" stroke-width="14" stroke-linecap="round"/>
+</svg>
