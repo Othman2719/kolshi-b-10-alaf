@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, initDatabase } from './db/db';
-import { Language } from './i18n/translations';
-import { Navbar, ActiveTab } from './components/Navbar';
+import type { Language } from './i18n/translations';
+import type { ActiveTab } from './components/Navbar';
+import { Navbar } from './components/Navbar';
 import { PosView } from './components/PosView';
 import { StockView } from './components/StockView';
 import { SuppliersView } from './components/SuppliersView';
@@ -81,7 +82,7 @@ export function App() {
       />
 
       {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-3 sm:p-4 lg:p-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto p-2 sm:p-4 lg:p-6">
         {activeTab === 'pos' && <PosView lang={lang} />}
         {activeTab === 'stock' && <StockView lang={lang} />}
         {activeTab === 'suppliers' && <SuppliersView lang={lang} />}

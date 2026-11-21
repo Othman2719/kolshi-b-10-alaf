@@ -1,8 +1,9 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
-import { Product, SaleItem } from '../types';
-import { translations, Language } from '../i18n/translations';
+import type { Product, SaleItem } from '../types';
+import type { Language } from '../i18n/translations';
+import { translations } from '../i18n/translations';
 import { playBeep } from '../utils/audio';
 import { BarcodeScanner } from './BarcodeScanner';
 import confetti from 'canvas-confetti';
@@ -14,11 +15,10 @@ import {
   Minus,
   Trash2,
   CheckCircle,
-  AlertTriangle,
   RotateCcw,
-  Sparkles,
-  Receipt,
   X,
+  ArrowRight,
+  ChevronUp,
 } from 'lucide-react';
 import { INITIAL_CATEGORIES } from '../db/initialData';
 
@@ -35,6 +35,7 @@ export const PosView: React.FC<PosViewProps> = ({ lang }) => {
   const [cart, setCart] = useState<SaleItem[]>([]);
   const [cashGiven, setCashGiven] = useState<string>('');
   const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [isMobileCartOpen, setIsMobileCartOpen] = useState(false);
   const [lastSaleReceipt, setLastSaleReceipt] = useState<{
     id: number;
     items: SaleItem[];
@@ -81,7 +82,6 @@ export const PosView: React.FC<PosViewProps> = ({ lang }) => {
     let lastKeyTime = Date.now();
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore if user is typing in an input
       if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) {
         return;
       }
@@ -129,7 +129,7 @@ export const PosView: React.FC<PosViewProps> = ({ lang }) => {
       if (existing) {
         if (existing.quantity >= product.stock) {
           playBeep('alert');
-          return prevCart; // Can't add more than stock
+          return prevCart;
         }
         return prevCart.map((i) =>
           i.productId === product.id ? { ...i, quantity: i.quantity + 1, total: (i.quantity + 1) * 100 } : i
@@ -206,10 +206,8 @@ export const PosView: React.FC<PosViewProps> = ({ lang }) => {
 
     try {
       await db.transaction('rw', [db.products, db.sales], async () => {
-        // 1. Record sale
         const saleId = await db.sales.add(saleRecord);
 
-        // 2. Decrement stock
         for (const item of cart) {
           const prod = await db.products.get(item.productId);
           if (prod) {
@@ -220,7 +218,6 @@ export const PosView: React.FC<PosViewProps> = ({ lang }) => {
           }
         }
 
-        // Show receipt modal
         setLastSaleReceipt({
           id: saleId as number,
           items: [...cart],
@@ -239,19 +236,170 @@ export const PosView: React.FC<PosViewProps> = ({ lang }) => {
           origin: { y: 0.8 },
         });
       } catch (e) {
-        // confetti fallback
+        // fallback
       }
 
       setCart([]);
       setCashGiven('');
+      setIsMobileCartOpen(false);
     } catch (err) {
       console.error('Error validating sale:', err);
       alert('Erreur lors de la validation de la vente.');
     }
   };
 
+  // Render the cart details (reused between desktop sidebar & mobile drawer)
+  const renderCartContent = () => (
+    <div className="flex flex-col h-full">
+      {/* Cart Items List */}
+      <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2 min-h-[140px] max-h-[40vh] lg:max-h-none">
+        {cart.length === 0 ? (
+          <div className="flex-1 flex flex-col items-center justify-center text-center p-6 text-slate-400">
+            <ShoppingCart className="w-12 h-12 text-slate-300 stroke-[1.5] mb-2" />
+            <p className="text-sm font-medium">{t.emptyCart}</p>
+          </div>
+        ) : (
+          cart.map((item) => (
+            <div
+              key={item.productId}
+              className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+            >
+              <div className="flex-1 min-w-0 pr-2">
+                <p className="text-xs font-bold text-slate-800 truncate">
+                  {item.productName}
+                </p>
+                <p className="text-[11px] text-emerald-700 font-bold">
+                  {item.quantity} × 100 DA = {item.total} DA
+                </p>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => updateQuantity(item.productId, -1)}
+                  className="w-7 h-7 bg-white hover:bg-slate-200 border border-slate-300 rounded-lg flex items-center justify-center text-slate-700 active:scale-90 font-bold"
+                >
+                  <Minus className="w-3.5 h-3.5" />
+                </button>
+                <span className="w-6 text-center text-sm font-black text-slate-900">
+                  {item.quantity}
+                </span>
+                <button
+                  onClick={() => updateQuantity(item.productId, 1)}
+                  className="w-7 h-7 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg flex items-center justify-center active:scale-90 font-bold shadow-xs"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => removeFromCart(item.productId)}
+                  className="p-1.5 text-slate-400 hover:text-red-500 rounded-lg transition-colors ml-1"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Cart Calculation & Payment */}
+      <div className="p-3.5 bg-slate-50 border-t border-slate-200 flex flex-col gap-3">
+        {/* Total Bar */}
+        <div className="flex items-center justify-between px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-xl">
+          <div>
+            <span className="text-xs text-emerald-800 font-medium">
+              {t.totalArticles}: <b className="text-sm">{totalItems}</b>
+            </span>
+          </div>
+          <div className="text-right">
+            <span className="text-xs text-emerald-800 font-medium block">
+              {t.totalToPay}
+            </span>
+            <span className="text-2xl font-black text-emerald-700">
+              {totalAmount} <span className="text-xs">DA</span>
+            </span>
+          </div>
+        </div>
+
+        {/* Quick Cash Presets */}
+        {cart.length > 0 && (
+          <div className="flex gap-1.5">
+            <button
+              type="button"
+              onClick={() => setCashGiven(totalAmount.toString())}
+              className="flex-1 py-1.5 px-2 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg text-xs font-bold text-slate-700 active:scale-95 transition-all text-center"
+            >
+              {t.quickCashExact}
+            </button>
+            {[500, 1000, 2000].map((amt) => (
+              <button
+                key={amt}
+                type="button"
+                onClick={() => setCashGiven(amt.toString())}
+                className="flex-1 py-1.5 px-2 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg text-xs font-bold text-slate-700 active:scale-95 transition-all text-center"
+              >
+                {amt} DA
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Cash Given & Change */}
+        {cart.length > 0 && (
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                {t.cashGiven}
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  value={cashGiven}
+                  onChange={(e) => setCashGiven(e.target.value)}
+                  placeholder={totalAmount.toString()}
+                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-base font-black text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
+                  DA
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[11px] font-bold text-slate-600 block mb-1">
+                {t.changeToReturn}
+              </label>
+              <div className="px-3 py-2 bg-white border border-slate-300 rounded-xl flex items-center justify-between">
+                <span
+                  className={`text-base font-black ${
+                    changeToReturn > 0 ? 'text-amber-600' : 'text-slate-400'
+                  }`}
+                >
+                  {changeToReturn}
+                </span>
+                <span className="text-xs font-bold text-slate-400">DA</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Validate Button */}
+        <button
+          type="button"
+          disabled={cart.length === 0}
+          onClick={handleValidateSale}
+          className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-base font-black rounded-xl shadow-md transition-all active:scale-98 flex items-center justify-center gap-2"
+        >
+          <CheckCircle className="w-5 h-5" />
+          <span>
+            {t.validateSale} ({totalAmount} DA)
+          </span>
+        </button>
+      </div>
+    </div>
+  );
+
   return (
-    <div className="flex flex-col lg:flex-row gap-4 h-[calc(100vh-130px)] pb-16 lg:pb-0">
+    <div className="flex flex-col lg:flex-row gap-4 min-h-[calc(100vh-140px)] pb-28 lg:pb-0">
       {/* LEFT: PRODUCTS CATALOG & SEARCH */}
       <div className="flex-1 flex flex-col bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
         {/* Top Search & Actions */}
@@ -282,6 +430,19 @@ export const PosView: React.FC<PosViewProps> = ({ lang }) => {
             >
               <Camera className="w-4 h-4" />
               <span className="hidden sm:inline">{t.scanBarcode}</span>
+            </button>
+
+            {/* Mobile Cart Button Icon */}
+            <button
+              onClick={() => setIsMobileCartOpen(true)}
+              className="lg:hidden relative p-2.5 bg-slate-900 text-white rounded-xl shadow-xs active:scale-95 transition-all"
+            >
+              <ShoppingCart className="w-5 h-5" />
+              {totalItems > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 bg-emerald-500 text-white text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center border-2 border-white">
+                  {totalItems}
+                </span>
+              )}
             </button>
           </div>
 
@@ -372,8 +533,8 @@ export const PosView: React.FC<PosViewProps> = ({ lang }) => {
         </div>
       </div>
 
-      {/* RIGHT: CART & QUICK CASH REGISTER */}
-      <div className="w-full lg:w-96 flex flex-col bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+      {/* DESKTOP RIGHT SIDEBAR: CART (VISIBLE ON LG+) */}
+      <div className="hidden lg:flex w-96 flex-col bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
         {/* Cart Header */}
         <div className="p-3.5 bg-slate-900 text-white flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -390,152 +551,76 @@ export const PosView: React.FC<PosViewProps> = ({ lang }) => {
             </button>
           )}
         </div>
+        {renderCartContent()}
+      </div>
 
-        {/* Cart Item List */}
-        <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2 min-h-[160px] max-h-[300px] lg:max-h-none">
-          {cart.length === 0 ? (
-            <div className="flex-1 flex flex-col items-center justify-center text-center p-6 text-slate-400">
-              <ShoppingCart className="w-12 h-12 text-slate-300 stroke-[1.5] mb-2" />
-              <p className="text-sm font-medium">{t.emptyCart}</p>
-            </div>
-          ) : (
-            cart.map((item) => (
-              <div
-                key={item.productId}
-                className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
-              >
-                <div className="flex-1 min-w-0 pr-2">
-                  <p className="text-xs font-bold text-slate-800 truncate">
-                    {item.productName}
-                  </p>
-                  <p className="text-[11px] text-emerald-700 font-bold">
-                    {item.quantity} × 100 DA = {item.total} DA
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-1.5">
-                  <button
-                    onClick={() => updateQuantity(item.productId, -1)}
-                    className="w-7 h-7 bg-white hover:bg-slate-200 border border-slate-300 rounded-lg flex items-center justify-center text-slate-700 active:scale-90 font-bold"
-                  >
-                    <Minus className="w-3.5 h-3.5" />
-                  </button>
-                  <span className="w-6 text-center text-sm font-black text-slate-900">
-                    {item.quantity}
-                  </span>
-                  <button
-                    onClick={() => updateQuantity(item.productId, 1)}
-                    className="w-7 h-7 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg flex items-center justify-center active:scale-90 font-bold shadow-xs"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={() => removeFromCart(item.productId)}
-                    className="p-1.5 text-slate-400 hover:text-red-500 rounded-lg transition-colors ml-1"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            ))
-          )}
+      {/* MOBILE FLOATING STICKY CHECKOUT BAR (VISIBLE ON MOBILE ONLY) */}
+      <div className="lg:hidden fixed bottom-16 left-3 right-3 z-30 bg-slate-900/95 backdrop-blur-md text-white p-3 rounded-2xl shadow-2xl flex items-center justify-between border border-slate-800">
+        <div
+          onClick={() => setIsMobileCartOpen(true)}
+          className="flex items-center gap-2.5 cursor-pointer flex-1"
+        >
+          <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center font-black text-sm text-white shadow-xs">
+            {totalItems}
+          </div>
+          <div>
+            <span className="text-xs text-slate-300 block">
+              {totalItems} {lang === 'ar' ? 'سلعة في السلة' : 'articles'}
+            </span>
+            <span className="text-lg font-black text-emerald-400">
+              {totalAmount} <span className="text-xs">DA</span>
+            </span>
+          </div>
         </div>
 
-        {/* Calculation & Payment Area */}
-        <div className="p-3.5 bg-slate-50 border-t border-slate-200 flex flex-col gap-3">
-          {/* Total Bar */}
-          <div className="flex items-center justify-between px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-xl">
-            <div>
-              <span className="text-xs text-emerald-800 font-medium">
-                {t.totalArticles}: <b className="text-sm">{totalItems}</b>
-              </span>
+        <button
+          type="button"
+          onClick={() => setIsMobileCartOpen(true)}
+          disabled={cart.length === 0}
+          className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-black text-xs sm:text-sm rounded-xl flex items-center gap-1.5 shadow-md active:scale-95 transition-all"
+        >
+          <span>{lang === 'ar' ? 'تأكيد الحساب' : 'Encaisser'}</span>
+          <ArrowRight className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* MOBILE CART BOTTOM DRAWER / MODAL */}
+      {isMobileCartOpen && (
+        <div className="lg:hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex flex-col justify-end">
+          <div className="bg-white rounded-t-3xl max-h-[85vh] flex flex-col overflow-hidden shadow-2xl animate-in slide-in-from-bottom duration-200">
+            {/* Drawer Header */}
+            <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ShoppingCart className="w-5 h-5 text-emerald-400" />
+                <h3 className="font-bold text-base">
+                  {t.cartTitle} ({totalItems})
+                </h3>
+              </div>
+              <div className="flex items-center gap-2">
+                {cart.length > 0 && (
+                  <button
+                    onClick={clearCart}
+                    className="text-xs text-slate-400 hover:text-red-400 px-2 py-1 rounded"
+                  >
+                    {t.cancelSale}
+                  </button>
+                )}
+                <button
+                  onClick={() => setIsMobileCartOpen(false)}
+                  className="p-1 rounded-full text-slate-400 hover:text-white"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
             </div>
-            <div className="text-right">
-              <span className="text-xs text-emerald-800 font-medium block">
-                {t.totalToPay}
-              </span>
-              <span className="text-2xl font-black text-emerald-700">
-                {totalAmount} <span className="text-xs">DA</span>
-              </span>
+
+            {/* Cart content inside drawer */}
+            <div className="overflow-y-auto">
+              {renderCartContent()}
             </div>
           </div>
-
-          {/* Quick Cash Presets */}
-          {cart.length > 0 && (
-            <div className="flex gap-1.5">
-              <button
-                type="button"
-                onClick={() => setCashGiven(totalAmount.toString())}
-                className="flex-1 py-1.5 px-2 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg text-xs font-bold text-slate-700 active:scale-95 transition-all text-center"
-              >
-                {t.quickCashExact}
-              </button>
-              {[500, 1000, 2000].map((amt) => (
-                <button
-                  key={amt}
-                  type="button"
-                  onClick={() => setCashGiven(amt.toString())}
-                  className="flex-1 py-1.5 px-2 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg text-xs font-bold text-slate-700 active:scale-95 transition-all text-center"
-                >
-                  {amt} DA
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* Cash Given & Change */}
-          {cart.length > 0 && (
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="text-[11px] font-bold text-slate-600 block mb-1">
-                  {t.cashGiven}
-                </label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    value={cashGiven}
-                    onChange={(e) => setCashGiven(e.target.value)}
-                    placeholder={totalAmount.toString()}
-                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-base font-black text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  />
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
-                    DA
-                  </span>
-                </div>
-              </div>
-
-              <div>
-                <label className="text-[11px] font-bold text-slate-600 block mb-1">
-                  {t.changeToReturn}
-                </label>
-                <div className="px-3 py-2 bg-white border border-slate-300 rounded-xl flex items-center justify-between">
-                  <span
-                    className={`text-base font-black ${
-                      changeToReturn > 0 ? 'text-amber-600' : 'text-slate-400'
-                    }`}
-                  >
-                    {changeToReturn}
-                  </span>
-                  <span className="text-xs font-bold text-slate-400">DA</span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Validate Button */}
-          <button
-            type="button"
-            disabled={cart.length === 0}
-            onClick={handleValidateSale}
-            className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-base font-black rounded-xl shadow-md transition-all active:scale-98 flex items-center justify-center gap-2"
-          >
-            <CheckCircle className="w-5 h-5" />
-            <span>
-              {t.validateSale} ({totalAmount} DA)
-            </span>
-          </button>
         </div>
-      </div>
+      )}
 
       {/* Barcode Scanner Modal */}
       <BarcodeScanner
